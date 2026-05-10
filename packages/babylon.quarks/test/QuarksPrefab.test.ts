@@ -57,4 +57,44 @@ describe('QuarksPrefab', () => {
         prefab.setTime(1.0);
         expect(emitEnded).toBe(true);
     });
+
+    it('supports three-style timeline entries with clip references', () => {
+        const root = new TransformNode('root-three', scene);
+        const animatedTarget = new TransformNode('animated-target', scene);
+        (animatedTarget as any)._quarksUUID = 'animated-uuid';
+        animatedTarget.parent = root;
+
+        const clip = {
+            uuid: 'clip-uuid',
+            duration: 1.5,
+            play: jest.fn(),
+            pause: jest.fn(),
+            stop: jest.fn(),
+            setTime: jest.fn(),
+        };
+        (animatedTarget as any).animations = [clip];
+
+        const prefab = QuarksPrefab.fromJSON({
+            name: 'prefab-three',
+            animationData: [
+                {startTime: 0.25, duration: 1.5, type: 'three', targetUUID: 'animated-uuid', clipUUID: 'clip-uuid', loop: false},
+            ],
+        }, scene);
+        prefab.parent = root;
+        prefab.resolveReferences(root);
+
+        expect(prefab.animationData.length).toBe(1);
+        expect(prefab.animationData[0].type).toBe('three');
+        expect((prefab.animationData[0] as any).clipUUID).toBe('clip-uuid');
+
+        prefab.play();
+        prefab.update(0.3);
+        expect(clip.play).toHaveBeenCalled();
+
+        prefab.setTime(0.5);
+        expect(clip.setTime).toHaveBeenCalled();
+
+        const json = prefab.toJSON();
+        expect(json.animationData[0].clipUUID).toBe('clip-uuid');
+    });
 });

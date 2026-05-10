@@ -1,5 +1,6 @@
 import {loadPlugin} from 'quarks.core';
 import {MeshSurfaceEmitterPlugin} from './MeshSurfaceEmitter';
+import {registerShaderChunks} from './shaders';
 
 export {BatchedRenderer} from './BatchedRenderer';
 export type {VFXBatchSettings} from './BatchedRenderer';
@@ -103,4 +104,5 @@ export type {
 } from 'quarks.core';
 
 console.log(' Particle system powered by babylon.quarks. https://quarks.art/');
+registerShaderChunks();
 loadPlugin(MeshSurfaceEmitterPlugin);

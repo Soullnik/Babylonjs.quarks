@@ -1,6 +1,7 @@
 import {NullEngine} from '@babylonjs/core/Engines/nullEngine';
 import {Scene} from '@babylonjs/core/scene';
 import {Matrix, Quaternion, Vector3} from '@babylonjs/core/Maths/math.vector';
+import {Mesh} from '@babylonjs/core/Meshes/mesh';
 import {QuarksLoader} from '../src/QuarksLoader';
 import {QuarksPrefab} from '../src/QuarksPrefab';
 
@@ -160,6 +161,39 @@ describe('QuarksLoader matrix decomposition', () => {
         const prefab = root.getChildren().find((node) => node instanceof QuarksPrefab);
         expect(prefab).toBeInstanceOf(QuarksPrefab);
         expect((prefab as QuarksPrefab).animationData.length).toBe(1);
+
+        scene.dispose();
+        engine.dispose();
+    });
+
+    it('parses mesh nodes and extended object types with placeholders', () => {
+        const engine = new NullEngine();
+        const scene = new Scene(engine);
+        const loader = new QuarksLoader(scene);
+
+        const root = loader.parse({
+            geometries: [{uuid: 'plane', type: 'PlaneGeometry', width: 2, height: 2}],
+            materials: [{uuid: 'mat', type: 'MeshBasicMaterial', transparent: true, blending: 2}],
+            object: {
+                uuid: 'root',
+                type: 'Scene',
+                children: [
+                    {uuid: 'mesh-1', type: 'Mesh', name: 'mesh-1', geometry: 'plane', material: 'mat'},
+                    {uuid: 'camera-1', type: 'PerspectiveCamera', name: 'camera-1'},
+                    {uuid: 'light-1', type: 'DirectionalLight', name: 'light-1'},
+                ],
+            },
+        });
+
+        const children = root.getChildren();
+        const mesh = children.find((node) => node.name === 'mesh-1');
+        const cameraNode = children.find((node) => node.name === 'camera-1') as any;
+        const lightNode = children.find((node) => node.name === 'light-1') as any;
+
+        expect(mesh).toBeInstanceOf(Mesh);
+        expect((mesh as Mesh).getTotalVertices()).toBeGreaterThan(0);
+        expect(cameraNode.quarksOriginalType).toBe('PerspectiveCamera');
+        expect(lightNode.quarksOriginalType).toBe('DirectionalLight');
 
         scene.dispose();
         engine.dispose();

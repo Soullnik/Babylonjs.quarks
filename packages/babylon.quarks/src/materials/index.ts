@@ -1,1 +1,1 @@
-export type BabylonParticleMaterial = any;
+export * from './ParticleMaterials';

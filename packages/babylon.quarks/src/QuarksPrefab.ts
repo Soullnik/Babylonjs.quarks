@@ -4,17 +4,29 @@ import {Scene} from '@babylonjs/core/scene';
 import {ParticleEmitter} from './ParticleEmitter';
 import {BatchedRenderer} from './BatchedRenderer';
 
+interface QuarksTimelineClip {
+    uuid?: string;
+    duration?: number;
+    play?: () => void;
+    pause?: () => void;
+    stop?: () => void;
+    setTime?: (time: number) => void;
+}
+
 interface AnimationData extends IAnimationData {
-    type: 'ps';
-    target: ParticleEmitter;
+    type: 'three' | 'ps';
+    target: TransformNode;
     loop: boolean;
+    clip?: QuarksTimelineClip;
+    clipUUID?: string;
 }
 
 interface AnimationJSON {
     startTime: number;
     duration: number;
-    type: 'ps';
+    type: 'three' | 'ps';
     targetUUID: string;
+    clipUUID?: string;
     loop: boolean;
 }
 
@@ -58,6 +70,29 @@ export class QuarksPrefab extends TransformNode implements IPrefab {
         return data;
     }
 
+    addThreeAnimation(
+        target: TransformNode,
+        clip?: QuarksTimelineClip,
+        startTime = 0,
+        duration = clip?.duration ?? 0,
+        loop = false,
+        clipUUID?: string
+    ): AnimationData {
+        const animationDuration = duration > 0 ? duration : clip?.duration ?? 0;
+        const data: AnimationData = {
+            startTime,
+            duration: animationDuration,
+            type: 'three',
+            loop,
+            target,
+            clip,
+            clipUUID: clipUUID ?? clip?.uuid,
+        };
+        this.animationData.push(data);
+        this.updateDuration();
+        return data;
+    }
+
     removeAnimation(index: number): void {
         this.animationData.splice(index, 1);
         this.updateDuration();
@@ -73,7 +108,11 @@ export class QuarksPrefab extends TransformNode implements IPrefab {
         if (!this.isPlaying) return;
         this.isPlaying = false;
         this.animationData.forEach((animation) => {
-            animation.target.system.pause();
+            if (animation.type === 'ps' && animation.target instanceof ParticleEmitter) {
+                animation.target.system.pause();
+                return;
+            }
+            animation.clip?.pause?.();
         });
     }
 
@@ -81,7 +120,11 @@ export class QuarksPrefab extends TransformNode implements IPrefab {
         this.pause();
         this.currentTime = -0.00001;
         this.animationData.forEach((animation) => {
-            animation.target.system.stop();
+            if (animation.type === 'ps' && animation.target instanceof ParticleEmitter) {
+                animation.target.system.stop();
+                return;
+            }
+            animation.clip?.stop?.();
         });
     }
 
@@ -104,19 +147,29 @@ export class QuarksPrefab extends TransformNode implements IPrefab {
             const isActive = this.currentTime >= startTime && this.currentTime <= endTime;
             const wasActive = previousTime >= startTime && previousTime <= endTime;
             if (isActive && !wasActive) {
-                animation.target.system.restart();
-                if (this._batchedRenderer) {
-                    this._batchedRenderer.addSystem(animation.target.system);
+                if (animation.type === 'ps' && animation.target instanceof ParticleEmitter) {
+                    animation.target.system.restart();
+                    if (this._batchedRenderer) {
+                        this._batchedRenderer.addSystem(animation.target.system);
+                    }
+                } else {
+                    animation.clip?.play?.();
                 }
                 return;
             }
 
             if (!isActive && wasActive) {
-                if (animation.loop) {
+                if (animation.loop && animation.type === 'ps' && animation.target instanceof ParticleEmitter) {
                     animation.target.system.restart();
                     return;
                 }
-                animation.target.system.endEmit();
+                if (animation.type === 'ps' && animation.target instanceof ParticleEmitter) {
+                    animation.target.system.endEmit();
+                } else if (animation.loop) {
+                    animation.clip?.play?.();
+                } else {
+                    animation.clip?.stop?.();
+                }
             }
         });
     }
@@ -130,11 +183,23 @@ export class QuarksPrefab extends TransformNode implements IPrefab {
             const isActive = this.currentTime >= startTime && this.currentTime < endTime;
             const wasActive = previousTime >= startTime && previousTime < endTime;
             if (isActive && !wasActive) {
-                animation.target.system.restart();
+                if (animation.type === 'ps' && animation.target instanceof ParticleEmitter) {
+                    animation.target.system.restart();
+                } else {
+                    animation.clip?.play?.();
+                }
                 return;
             }
             if (!isActive && wasActive) {
-                animation.target.system.endEmit();
+                if (animation.type === 'ps' && animation.target instanceof ParticleEmitter) {
+                    animation.target.system.endEmit();
+                } else {
+                    animation.clip?.stop?.();
+                }
+                return;
+            }
+            if (isActive && animation.type === 'three') {
+                animation.clip?.setTime?.(Math.max(time - startTime, 0));
             }
         });
     }
@@ -161,12 +226,24 @@ export class QuarksPrefab extends TransformNode implements IPrefab {
 
         this._tempAnimationJSON.forEach((animationJSON) => {
             const target = nodesMap[animationJSON.targetUUID];
-            if (target instanceof ParticleEmitter) {
+            if (animationJSON.type === 'ps' && target instanceof ParticleEmitter) {
                 this.addParticleSystemAnimation(
                     target,
                     animationJSON.startTime,
                     animationJSON.duration,
                     animationJSON.loop
+                );
+                return;
+            }
+            if (animationJSON.type === 'three' && target) {
+                const clip = this.resolveTimelineClip(target, animationJSON.clipUUID);
+                this.addThreeAnimation(
+                    target,
+                    clip,
+                    animationJSON.startTime,
+                    animationJSON.duration,
+                    animationJSON.loop,
+                    animationJSON.clipUUID
                 );
             }
         });
@@ -183,6 +260,7 @@ export class QuarksPrefab extends TransformNode implements IPrefab {
                 duration: animation.duration,
                 type: animation.type,
                 targetUUID: (animation.target as any)._quarksUUID ?? animation.target.uniqueId.toString(),
+                clipUUID: animation.type === 'three' ? animation.clipUUID ?? animation.clip?.uuid : undefined,
                 loop: animation.loop,
             })),
         };
@@ -191,9 +269,29 @@ export class QuarksPrefab extends TransformNode implements IPrefab {
     static fromJSON(json: any, scene?: Scene): QuarksPrefab {
         const prefab = new QuarksPrefab(json.name || 'QuarksPrefab', scene);
         if (Array.isArray(json.animationData)) {
-            prefab._tempAnimationJSON = json.animationData.filter((item: any) => item?.type === 'ps');
+            prefab._tempAnimationJSON = json.animationData.filter((item: any) => item?.type === 'ps' || item?.type === 'three');
         }
         return prefab;
+    }
+
+    private resolveTimelineClip(target: TransformNode, clipUUID?: string): QuarksTimelineClip | undefined {
+        const animationSources = [
+            (target as any).animations,
+            (target as any).animationGroups,
+            (target.metadata as any)?.animations,
+            (target.metadata as any)?.animationGroups,
+        ];
+        for (const source of animationSources) {
+            if (!Array.isArray(source)) continue;
+            if (!clipUUID) {
+                return source[0];
+            }
+            const found = source.find((item: any) => item?.uuid === clipUUID);
+            if (found) {
+                return found;
+            }
+        }
+        return undefined;
     }
 
     private updateDuration(): void {

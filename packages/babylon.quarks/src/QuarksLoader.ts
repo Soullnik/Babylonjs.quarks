@@ -1,7 +1,9 @@
 import {Scene} from '@babylonjs/core/scene';
 import {TransformNode} from '@babylonjs/core/Meshes/transformNode';
 import {Mesh} from '@babylonjs/core/Meshes/mesh';
+import {VertexData} from '@babylonjs/core/Meshes/mesh.vertexData';
 import {Texture} from '@babylonjs/core/Materials/Textures/texture';
+import {StandardMaterial} from '@babylonjs/core/Materials/standardMaterial';
 import {Constants} from '@babylonjs/core/Engines/constants';
 import {Matrix, Quaternion, Vector3} from '@babylonjs/core/Maths/math.vector';
 import {
@@ -216,16 +218,98 @@ export class QuarksLoader {
         }
     }
 
+    private getGeometry(meta: LoadedMeta, geometryId: string | undefined): ParsedGeometry | undefined {
+        if (!geometryId) return undefined;
+        return meta.geometries[geometryId];
+    }
+
+    private getMaterial(meta: LoadedMeta, materialId: string | string[] | undefined): any | undefined {
+        if (!materialId) return undefined;
+        const selectedId = Array.isArray(materialId) ? materialId[0] : materialId;
+        return meta.materials[selectedId];
+    }
+
+    private createPlaceholderNode(type: string, name?: string): TransformNode {
+        const node = new TransformNode(name || type || 'node', this.scene);
+        (node as any).quarksOriginalType = type;
+        return node;
+    }
+
+    private createMeshNode(data: any, meta: LoadedMeta): Mesh {
+        const mesh = new Mesh(data.name || data.type || 'mesh', this.scene);
+        const geometry = this.getGeometry(meta, data.geometry);
+        if (geometry && geometry.positions.length > 0 && geometry.indices.length > 0) {
+            const vertexData = new VertexData();
+            vertexData.positions = Array.from(geometry.positions);
+            vertexData.indices = Array.from(geometry.indices);
+            if (geometry.uvs && geometry.uvs.length > 0) {
+                vertexData.uvs = Array.from(geometry.uvs);
+            }
+            if (geometry.normals && geometry.normals.length > 0) {
+                vertexData.normals = Array.from(geometry.normals);
+            }
+            vertexData.applyToMesh(mesh, true);
+        }
+
+        const materialInfo = this.getMaterial(meta, data.material);
+        if (materialInfo) {
+            const material = new StandardMaterial(`quarks_loader_material_${materialInfo.uuid}`, this.scene);
+            material.alphaMode = materialInfo.alphaMode ?? Constants.ALPHA_COMBINE;
+            material.backFaceCulling = materialInfo.side !== 2;
+            material.alphaCutOff = materialInfo.alphaTest ?? 0;
+            material.disableDepthWrite = !(materialInfo.depthWrite ?? false);
+            if (materialInfo.texture) {
+                material.diffuseTexture = materialInfo.texture;
+                material.opacityTexture = materialInfo.texture;
+            }
+            mesh.material = material;
+        }
+        return mesh;
+    }
+
     private parseObject(data: any, meta: LoadedMeta): TransformNode {
         let node: TransformNode;
-
-        if (data.type === 'QuarksPrefab') {
-            node = QuarksPrefab.fromJSON(data, this.scene);
-        } else if (data.type === 'ParticleEmitter' && data.ps) {
-            const ps = this.parseParticleSystem(data.ps, meta);
-            node = ps.emitter;
-        } else {
-            node = new TransformNode(data.name || data.type || 'node', this.scene);
+        switch (data.type) {
+            case 'QuarksPrefab':
+                node = QuarksPrefab.fromJSON(data, this.scene);
+                break;
+            case 'ParticleEmitter':
+                if (data.ps) {
+                    const ps = this.parseParticleSystem(data.ps, meta);
+                    node = ps.emitter;
+                    break;
+                }
+                node = this.createPlaceholderNode(data.type, data.name);
+                break;
+            case 'Mesh':
+            case 'SkinnedMesh':
+            case 'InstancedMesh':
+            case 'BatchedMesh':
+                node = this.createMeshNode(data, meta);
+                break;
+            case 'Scene':
+            case 'Group':
+            case 'Object3D':
+            case 'PerspectiveCamera':
+            case 'OrthographicCamera':
+            case 'AmbientLight':
+            case 'DirectionalLight':
+            case 'PointLight':
+            case 'RectAreaLight':
+            case 'SpotLight':
+            case 'HemisphereLight':
+            case 'LightProbe':
+            case 'LOD':
+            case 'Line':
+            case 'LineSegments':
+            case 'LineLoop':
+            case 'Points':
+            case 'Sprite':
+            case 'Bone':
+                node = this.createPlaceholderNode(data.type, data.name);
+                break;
+            default:
+                node = new TransformNode(data.name || data.type || 'node', this.scene);
         }
 
         if (data.uuid) (node as any)._quarksUUID = data.uuid;

@@ -1,3 +1,4 @@
+export * from './chunks';
 export {default as particleVertShader} from './particle_vert.glsl';
 export {default as particleFragShader} from './particle_frag.glsl';
 export {default as localParticleVertShader} from './local_particle_vert.glsl';
