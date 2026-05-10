@@ -21,62 +21,6 @@ export * from './shaders/';
 export * from './materials/';
 export * from 'quarks.core';
 
-// Re-export quarks.core runtime values (classes)
-export {
-    SpriteParticle,
-    TrailParticle,
-    // Behaviors (classes)
-    BehaviorFromJSON,
-    ApplyForce,
-    GravityForce,
-    ColorOverLife,
-    RotationOverLife,
-    Rotation3DOverLife,
-    SizeOverLife,
-    SpeedOverLife,
-    FrameOverLife,
-    ForceOverLife,
-    OrbitOverLife,
-    WidthOverLength,
-    Noise,
-    TurbulenceField,
-    ColorBySpeed,
-    SizeBySpeed,
-    RotationBySpeed,
-    LimitSpeedOverLife,
-    EmitSubParticleSystem,
-    // Shapes (classes)
-    PointEmitter,
-    SphereEmitter,
-    HemisphereEmitter,
-    ConeEmitter,
-    CircleEmitter,
-    DonutEmitter,
-    GridEmitter,
-    // Value generators (classes)
-    ConstantValue,
-    IntervalValue,
-    PiecewiseBezier,
-    Bezier,
-    // Color generators (classes)
-    ConstantColor,
-    ColorRange,
-    RandomColor,
-    Gradient,
-    RandomColorBetweenGradient,
-    // Rotation generators (classes)
-    AxisAngleGenerator,
-    EulerGenerator,
-    RandomQuatGenerator,
-    // Math (classes)
-    Vector2,
-    Vector3,
-    Vector4,
-    Quaternion,
-    Matrix3,
-    Matrix4,
-    MathUtils,
-} from 'quarks.core';
 
 // Re-export quarks.core types (interfaces - type-only)
 export type {
@@ -103,6 +47,8 @@ export type {
     Vector3Generator,
 } from 'quarks.core';
 
-console.log(' Particle system powered by babylon.quarks. https://quarks.art/');
 registerShaderChunks();
 loadPlugin(MeshSurfaceEmitterPlugin);
+// remove this line if you have pro license
+console.log('%c Particle system powered by babylon.quarks. https://quarks.art/', 'font-size: 14px; font-weight: bold;');
+
