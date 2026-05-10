@@ -37,6 +37,18 @@ export class ParticleEmitter extends TransformNode {
         super.dispose();
     }
 
+    extractFromCache(cache: any): any[] {
+        const values: any[] = [];
+        for (const key in cache) {
+            const data = cache[key];
+            if (data && typeof data === 'object') {
+                delete data.metadata;
+            }
+            values.push(data);
+        }
+        return values;
+    }
+
     clone(name?: string): ParticleEmitter {
         const clonedSystem = this.system.clone();
         const clonedEmitter = clonedSystem.emitter as ParticleEmitter;

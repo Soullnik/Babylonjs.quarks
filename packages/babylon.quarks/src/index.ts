@@ -16,6 +16,7 @@ export {QuarksLoader} from './QuarksLoader';
 export type {QuarksLoaderOptions} from './QuarksLoader';
 export {QuarksPrefab} from './QuarksPrefab';
 export {MeshSurfaceEmitter, MeshSurfaceEmitterPlugin} from './MeshSurfaceEmitter';
+export * from './shaders/';
 export * from 'quarks.core';
 
 // Re-export quarks.core runtime values (classes)
