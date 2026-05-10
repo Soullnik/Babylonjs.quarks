@@ -14,6 +14,8 @@ import {
 } from 'quarks.core';
 import {NullEngine} from '@babylonjs/core/Engines/nullEngine';
 import {Scene} from '@babylonjs/core/scene';
+import {Constants} from '@babylonjs/core/Engines/constants';
+import {StandardMaterial} from '@babylonjs/core/Materials/standardMaterial';
 import {ParticleSystem} from '../src/ParticleSystem';
 import {RenderMode} from '../src/VFXBatch';
 
@@ -156,5 +158,77 @@ describe('ParticleSystem', () => {
             speedFactor: 0.5,
         });
         expect(ps.renderMode).toBe(RenderMode.StretchedBillBoard);
+    });
+
+    it('should serialize and deserialize full parity contract', () => {
+        const ps = new ParticleSystem({
+            scene,
+            prewarm: true,
+            duration: 4,
+            looping: false,
+            startLife: new ConstantValue(2),
+            startSpeed: new ConstantValue(3),
+            startSize: new ConstantValue(1),
+            startColor: new ConstantColor(new Vector4(1, 0.5, 0.25, 1)),
+            emissionOverTime: new ConstantValue(12),
+            shape: new PointEmitter(),
+            renderMode: RenderMode.Trail,
+            rendererEmitterSettings: {
+                startLength: new ConstantValue(6),
+                followLocalOrigin: true,
+            },
+            uTileCount: 2,
+            vTileCount: 3,
+            blendTiles: true,
+            softParticles: true,
+            softNearFade: 0.1,
+            softFarFade: 1.5,
+            blendMode: Constants.ALPHA_COMBINE,
+            transparent: true,
+            depthTest: true,
+            depthWrite: false,
+            alphaTest: 0.2,
+            layerMask: 7,
+            worldSpace: true,
+        });
+
+        const meta: any = {textures: {}, materials: {}, geometries: {}};
+        const json = ps.toJSON(meta);
+        expect(json.version).toBe('3.0');
+        expect(json.prewarm).toBe(true);
+        expect(json.material).toBeDefined();
+        expect(json.instancingGeometry).toBeDefined();
+        expect(meta.materials[json.material!]).toBeDefined();
+        expect(meta.geometries[json.instancingGeometry as string]).toBeDefined();
+
+        const restored = ParticleSystem.fromJSON(json, meta, {}, scene);
+        expect(restored.renderMode).toBe(RenderMode.Trail);
+        expect(restored.uTileCount).toBe(2);
+        expect(restored.vTileCount).toBe(3);
+        expect(restored.blendTiles).toBe(true);
+        expect(restored.softParticles).toBe(true);
+        expect(restored.softNearFade).toBeCloseTo(0.1);
+        expect(restored.softFarFade).toBeCloseTo(1.5);
+        expect(restored.layers.mask).toBe(7);
+    });
+
+    it('should derive renderer settings from provided material', () => {
+        const material = new StandardMaterial('particleMat', scene);
+        material.alpha = 0.4;
+        material.alphaMode = Constants.ALPHA_SUBTRACT;
+        material.disableDepthWrite = true;
+
+        const ps = new ParticleSystem({
+            scene,
+            material,
+            renderMode: RenderMode.Mesh,
+            startLife: new ConstantValue(1),
+            emissionOverTime: new ConstantValue(0),
+        });
+
+        expect(ps.material).toBe(material);
+        expect(ps.blending).toBe(Constants.ALPHA_SUBTRACT);
+        expect(ps.softParticles).toBe(false);
+        expect(ps.texture).toBeNull();
     });
 });

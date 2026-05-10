@@ -7,26 +7,10 @@ import {Matrix, Quaternion, Vector3} from '@babylonjs/core/Maths/math.vector';
 import {
     Behavior,
     EmitSubParticleSystem,
-    BehaviorFromJSON,
-    EmitterFromJSON,
-    ValueGeneratorFromJSON,
-    ColorGeneratorFromJSON,
-    GeneratorFromJSON,
-    ConstantValue,
-    ConstantColor,
-    Vector4,
-    RotationGenerator,
-    FunctionValueGenerator,
-    ValueGenerator,
-    Vector3Generator,
-    ColorGenerator,
-    TrailSettings,
-    StretchedBillBoardSettings,
 } from 'quarks.core';
 import {ParticleSystem} from './ParticleSystem';
 import {ParticleEmitter} from './ParticleEmitter';
-import {RenderMode} from './VFXBatch';
-import {BatchedRenderer} from './BatchedRenderer';
+import {QuarksPrefab} from './QuarksPrefab';
 
 export interface QuarksLoaderOptions {
     baseUrl?: string;
@@ -235,7 +219,9 @@ export class QuarksLoader {
     private parseObject(data: any, meta: LoadedMeta): TransformNode {
         let node: TransformNode;
 
-        if (data.type === 'ParticleEmitter' && data.ps) {
+        if (data.type === 'QuarksPrefab') {
+            node = QuarksPrefab.fromJSON(data, this.scene);
+        } else if (data.type === 'ParticleEmitter' && data.ps) {
             const ps = this.parseParticleSystem(data.ps, meta);
             node = ps.emitter;
         } else {
@@ -277,100 +263,9 @@ export class QuarksLoader {
     }
 
     private parseParticleSystem(json: any, meta: LoadedMeta): ParticleSystem {
-        const shape = EmitterFromJSON(json.shape, meta as any);
-
-        let rendererEmitterSettings: any;
-        if (json.renderMode === RenderMode.Trail) {
-            const trailSettings = json.rendererEmitterSettings as any;
-            rendererEmitterSettings = {
-                startLength: trailSettings?.startLength ? ValueGeneratorFromJSON(trailSettings.startLength) : new ConstantValue(30),
-                followLocalOrigin: trailSettings?.followLocalOrigin ?? false,
-            };
-        } else if (json.renderMode === RenderMode.StretchedBillBoard) {
-            rendererEmitterSettings = json.rendererEmitterSettings || {};
-            if (json.speedFactor != undefined) {
-                (rendererEmitterSettings as StretchedBillBoardSettings).speedFactor = json.speedFactor;
-            }
-        } else {
-            rendererEmitterSettings = {};
-        }
-
-        const matInfo = meta.materials[json.material];
-        const texture = matInfo?.texture || null;
-        const transparent = matInfo?.transparent ?? json.transparent ?? true;
-        const blendMode = matInfo?.alphaMode ?? Constants.ALPHA_ADD;
-        const depthTest = matInfo?.depthTest ?? true;
-        const depthWrite = matInfo?.depthWrite ?? false;
-        const alphaTest = matInfo?.alphaTest ?? 0;
-
-        let geomData = meta.geometries[json.instancingGeometry];
-        if (!geomData) {
-            geomData = {
-                positions: new Float32Array([-0.5, -0.5, 0, 0.5, -0.5, 0, 0.5, 0.5, 0, -0.5, 0.5, 0]),
-                indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
-                uvs: new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]),
-            };
-        }
-
-        const ps = new ParticleSystem({
-            scene: this.scene,
-            autoDestroy: json.autoDestroy,
-            looping: json.looping,
-            prewarm: json.prewarm,
-            duration: json.duration,
-            shape,
-            startLife: ValueGeneratorFromJSON(json.startLife),
-            startSpeed: ValueGeneratorFromJSON(json.startSpeed),
-            startRotation: GeneratorFromJSON(json.startRotation) as any,
-            startSize: GeneratorFromJSON(json.startSize) as any,
-            startColor: ColorGeneratorFromJSON(json.startColor) as ColorGenerator,
-            emissionOverTime: ValueGeneratorFromJSON(json.emissionOverTime),
-            emissionOverDistance: ValueGeneratorFromJSON(json.emissionOverDistance),
-            emissionBursts: json.emissionBursts?.map((burst: any) => ({
-                time: burst.time,
-                count: typeof burst.count === 'number' ? new ConstantValue(burst.count) : ValueGeneratorFromJSON(burst.count),
-                probability: burst.probability ?? 1,
-                interval: burst.interval ?? 0.1,
-                cycle: burst.cycle ?? burst.cycleCount ?? 1,
-            })),
-            onlyUsedByOther: json.onlyUsedByOther,
-            instancingGeometry: geomData.positions,
-            instancingIndices: geomData.indices,
-            instancingUVs: geomData.uvs,
-            instancingNormals: geomData.normals,
-            renderMode: json.renderMode,
-            rendererEmitterSettings,
-            renderOrder: json.renderOrder,
-            texture,
-            transparent,
-            blendMode,
-            depthTest,
-            depthWrite,
-            alphaTest,
-            startTileIndex: typeof json.startTileIndex === 'number'
-                ? new ConstantValue(json.startTileIndex)
-                : (ValueGeneratorFromJSON(json.startTileIndex) as ValueGenerator),
-            uTileCount: json.uTileCount,
-            vTileCount: json.vTileCount,
-            blendTiles: json.blendTiles,
-            softParticles: json.softParticles,
-            softFarFade: json.softFarFade,
-            softNearFade: json.softNearFade,
-            behaviors: [],
-            worldSpace: json.worldSpace,
-            layerMask: json.layers,
-        });
-        (ps as any)._meshSurfaceReferenceUUID = json?.shape?.type === 'mesh_surface' ? json?.shape?.mesh : undefined;
-
         const dependencies: {[uuid: string]: Behavior} = {};
-        ps.behaviors = json.behaviors.map((behaviorJson: any) => {
-            const behavior = BehaviorFromJSON(behaviorJson, ps);
-            if (behavior && behavior.type === 'EmitSubParticleSystem') {
-                dependencies[behaviorJson.subParticleSystem] = behavior;
-            }
-            return behavior;
-        }).filter((b: any) => b !== null);
-
+        const ps = ParticleSystem.fromJSON(json, meta as any, dependencies, this.scene);
+        (ps as any)._meshSurfaceReferenceUUID = json?.shape?.type === 'mesh_surface' ? json?.shape?.mesh : undefined;
         return ps;
     }
 
@@ -390,6 +285,9 @@ export class QuarksLoader {
         traverse(root);
 
         const linkNode = (node: TransformNode) => {
+            if (node instanceof QuarksPrefab) {
+                node.resolveReferences(root);
+            }
             if (node instanceof ParticleEmitter) {
                 const system = node.system as ParticleSystem;
                 const meshSurfaceUUID = (system as any)._meshSurfaceReferenceUUID;

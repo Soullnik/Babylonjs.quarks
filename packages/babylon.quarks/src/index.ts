@@ -3,6 +3,7 @@ import {MeshSurfaceEmitterPlugin} from './MeshSurfaceEmitter';
 
 export {BatchedRenderer} from './BatchedRenderer';
 export type {VFXBatchSettings} from './BatchedRenderer';
+export {BatchedParticleRenderer} from './BatchedParticleRenderer';
 export {VFXBatch, RenderMode} from './VFXBatch';
 export type {StoredBatchSettings} from './VFXBatch';
 export {SpriteBatch} from './SpriteBatch';
@@ -13,6 +14,7 @@ export {ParticleEmitter} from './ParticleEmitter';
 export {QuarksUtil} from './QuarksUtil';
 export {QuarksLoader} from './QuarksLoader';
 export type {QuarksLoaderOptions} from './QuarksLoader';
+export {QuarksPrefab} from './QuarksPrefab';
 export {MeshSurfaceEmitter, MeshSurfaceEmitterPlugin} from './MeshSurfaceEmitter';
 export * from 'quarks.core';
 

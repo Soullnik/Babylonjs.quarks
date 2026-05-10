@@ -89,6 +89,7 @@ export interface ParticleSystemParameters {
     renderMode?: RenderMode;
     rendererEmitterSettings?: RendererEmitterSettings;
     speedFactor?: number;
+    material?: any;
     texture?: Texture | null;
     startTileIndex?: ValueGenerator;
     uTileCount?: number;
@@ -108,7 +109,68 @@ export interface ParticleSystemParameters {
     scene?: Scene;
 }
 
+export interface BurstParametersJSON {
+    time: number;
+    count: FunctionJSON | number;
+    cycle: number;
+    interval: number;
+    probability: number;
+}
+
+export interface ParticleSystemJSONParameters {
+    version: string;
+    autoDestroy: boolean;
+    looping: boolean;
+    prewarm: boolean;
+    duration: number;
+    shape: any;
+    startLife: FunctionJSON;
+    startSpeed: FunctionJSON;
+    startRotation: FunctionJSON;
+    startSize: FunctionJSON;
+    startColor: FunctionJSON;
+    emissionOverTime: FunctionJSON;
+    emissionOverDistance: FunctionJSON;
+    emissionBursts?: Array<BurstParametersJSON>;
+    onlyUsedByOther: boolean;
+    rendererEmitterSettings: RendererEmitterSettings;
+    instancingGeometry?: any;
+    renderMode: number;
+    renderOrder?: number;
+    speedFactor?: number;
+    texture?: string;
+    material?: string;
+    layers?: number;
+    startTileIndex: FunctionJSON | number;
+    uTileCount: number;
+    vTileCount: number;
+    blendTiles?: boolean;
+    softParticles?: boolean;
+    softFarFade?: number;
+    softNearFade?: number;
+    blending?: number;
+    transparent?: boolean;
+    depthTest?: boolean;
+    depthWrite?: boolean;
+    alphaTest?: number;
+    behaviors: Array<any>;
+    worldSpace: boolean;
+}
+
+export interface BabylonMetaData {
+    textures: {[uuid: string]: Texture | null};
+    materials: {[uuid: string]: any};
+    geometries: {[uuid: string]: any};
+    images?: {[uuid: string]: any};
+    shapes?: {[uuid: string]: any};
+    skeletons?: {[uuid: string]: any};
+    animations?: {[uuid: string]: any};
+    nodes?: {[uuid: string]: any};
+}
+
 export class ParticleSystem implements IParticleSystem {
+    private static serializationCounter = 0;
+
     autoDestroy: boolean;
     prewarm: boolean;
     looping: boolean;
@@ -142,6 +204,8 @@ export class ParticleSystem implements IParticleSystem {
     private normalMatrix: Matrix3 = new Matrix3();
     private memory: GeneratorMemory = [];
     private listeners: {[event: string]: Array<(event: ParticleSystemEvent) => void>} = {};
+    private readonly layerMaskProxy: {mask: number};
+    private materialRef: any = null;
     /** @internal **/
     _renderer?: BatchedRenderer;
 
@@ -153,12 +217,99 @@ export class ParticleSystem implements IParticleSystem {
         return this.emissionState.time;
     }
 
+    get layers() {
+        return this.layerMaskProxy;
+    }
+
     get texture() {
         return this.rendererSettings.texture;
     }
 
     set texture(texture: Texture | null) {
         this.rendererSettings.texture = texture;
+        this.neededToUpdateRender = true;
+    }
+
+    get material() {
+        return this.materialRef;
+    }
+
+    set material(material: any) {
+        this.materialRef = material;
+        this.applyMaterialSettings(material);
+    }
+
+    get uTileCount() {
+        return this.rendererSettings.uTileCount;
+    }
+
+    set uTileCount(u: number) {
+        this.rendererSettings.uTileCount = u;
+        this.neededToUpdateRender = true;
+    }
+
+    get vTileCount() {
+        return this.rendererSettings.vTileCount;
+    }
+
+    set vTileCount(v: number) {
+        this.rendererSettings.vTileCount = v;
+        this.neededToUpdateRender = true;
+    }
+
+    get blendTiles() {
+        return this.rendererSettings.blendTiles;
+    }
+
+    set blendTiles(v: boolean) {
+        this.rendererSettings.blendTiles = v;
+        this.neededToUpdateRender = true;
+    }
+
+    get softParticles() {
+        return this.rendererSettings.softParticles;
+    }
+
+    set softParticles(v: boolean) {
+        this.rendererSettings.softParticles = v;
+        this.neededToUpdateRender = true;
+    }
+
+    get softNearFade() {
+        return this.rendererSettings.softNearFade;
+    }
+
+    set softNearFade(v: number) {
+        this.rendererSettings.softNearFade = v;
+        this.neededToUpdateRender = true;
+    }
+
+    get softFarFade() {
+        return this.rendererSettings.softFarFade;
+    }
+
+    set softFarFade(v: number) {
+        this.rendererSettings.softFarFade = v;
+        this.neededToUpdateRender = true;
+    }
+
+    get instancingGeometry(): Float32Array {
+        return this.rendererSettings.instancingGeometry;
+    }
+
+    set instancingGeometry(geometry: Float32Array) {
+        this.restart();
+        this.particles.length = 0;
+        this.rendererSettings.instancingGeometry = geometry;
+        this.neededToUpdateRender = true;
+    }
+
+    get blending() {
+        return this.rendererSettings.materialBlendMode;
+    }
+
+    set blending(blending: number) {
+        this.rendererSettings.materialBlendMode = blending;
         this.neededToUpdateRender = true;
     }
 
@@ -212,6 +363,16 @@ export class ParticleSystem implements IParticleSystem {
     }
 
     constructor(parameters: ParticleSystemParameters) {
+        this.layerMaskProxy = {mask: parameters.layerMask ?? 0x0FFFFFFF};
+        Object.defineProperty(this.layerMaskProxy, 'mask', {
+            enumerable: true,
+            get: () => this.rendererSettings.layerMask,
+            set: (mask: number) => {
+                this.rendererSettings.layerMask = mask;
+                this.neededToUpdateRender = true;
+            },
+        });
+
         this.autoDestroy = parameters.autoDestroy ?? false;
         this.duration = parameters.duration ?? 1;
         this.looping = parameters.looping ?? true;
@@ -260,6 +421,20 @@ export class ParticleSystem implements IParticleSystem {
             texture: parameters.texture ?? null,
             layerMask: parameters.layerMask ?? 0x0FFFFFFF,
         };
+        if (this.rendererSettings.renderMode === RenderMode.Mesh && !this.rendererSettings.instancingNormals) {
+            this.rendererSettings.instancingNormals = ParticleSystem.createFallbackNormals(this.rendererSettings.instancingGeometry);
+        }
+
+        this.materialRef = parameters.material ?? null;
+        this.applyMaterialSettings(this.materialRef, {
+            blendMode: parameters.blendMode,
+            transparent: parameters.transparent,
+            depthTest: parameters.depthTest,
+            depthWrite: parameters.depthWrite,
+            alphaTest: parameters.alphaTest,
+            texture: parameters.texture,
+            layerMask: parameters.layerMask,
+        });
         this.neededToUpdateRender = true;
 
         this.particles = [];
@@ -285,6 +460,74 @@ export class ParticleSystem implements IParticleSystem {
         this.emitEnded = false;
         this.markForDestroy = false;
         this.prewarmed = false;
+    }
+
+    private applyMaterialSettings(
+        material: any,
+        overrides: {
+            blendMode?: number;
+            transparent?: boolean;
+            depthTest?: boolean;
+            depthWrite?: boolean;
+            alphaTest?: number;
+            texture?: Texture | null;
+            layerMask?: number;
+        } = {}
+    ) {
+        if (!this.rendererSettings) {
+            return;
+        }
+
+        const resolvedTexture =
+            overrides.texture !== undefined
+                ? overrides.texture
+                : (material?.albedoTexture ??
+                    material?.diffuseTexture ??
+                    material?.emissiveTexture ??
+                    material?.opacityTexture ??
+                    material?.baseTexture ??
+                    this.rendererSettings.texture ??
+                    null);
+        const resolvedBlendMode =
+            overrides.blendMode ??
+            (typeof material?.alphaMode === 'number' ? material.alphaMode : this.rendererSettings.materialBlendMode);
+        const resolvedTransparent =
+            overrides.transparent ??
+            (typeof material?.needAlphaBlending === 'function'
+                ? material.needAlphaBlending()
+                : typeof material?.alpha === 'number'
+                    ? material.alpha < 1
+                    : this.rendererSettings.materialTransparent);
+        const resolvedDepthTest =
+            overrides.depthTest ??
+            (typeof material?.disableDepthTest === 'boolean'
+                ? !material.disableDepthTest
+                : this.rendererSettings.materialDepthTest);
+        const resolvedDepthWrite =
+            overrides.depthWrite ??
+            (typeof material?.disableDepthWrite === 'boolean'
+                ? !material.disableDepthWrite
+                : typeof material?.forceDepthWrite === 'boolean'
+                    ? material.forceDepthWrite
+                    : this.rendererSettings.materialDepthWrite);
+        const resolvedAlphaTest =
+            overrides.alphaTest ??
+            (typeof material?.alphaCutOff === 'number'
+                ? material.alphaCutOff
+                : typeof material?.alphaCutOffValue === 'number'
+                    ? material.alphaCutOffValue
+                    : this.rendererSettings.materialAlphaTest);
+
+        this.rendererSettings.texture = resolvedTexture;
+        this.rendererSettings.materialBlendMode = resolvedBlendMode;
+        this.rendererSettings.materialTransparent = resolvedTransparent;
+        this.rendererSettings.materialDepthTest = resolvedDepthTest;
+        this.rendererSettings.materialDepthWrite = resolvedDepthWrite;
+        this.rendererSettings.materialAlphaTest = resolvedAlphaTest;
+        if (overrides.layerMask !== undefined) {
+            this.rendererSettings.layerMask = overrides.layerMask;
+        }
+        this.neededToUpdateRender = true;
     }
 
     pause() { this.paused = true; }
@@ -551,11 +794,30 @@ export class ParticleSystem implements IParticleSystem {
         emissionState.time += delta;
     }
 
-    toJSON(_metaData?: any, _options: SerializationOptions = {}): any {
+    toJSON(metaData?: BabylonMetaData | string, _options: SerializationOptions = {}): ParticleSystemJSONParameters {
+        const isRootObject = metaData === undefined || typeof metaData === 'string';
+        const meta: BabylonMetaData = isRootObject
+            ? {
+                geometries: {},
+                materials: {},
+                textures: {},
+                images: {},
+                shapes: {},
+                skeletons: {},
+                animations: {},
+                nodes: {},
+            }
+            : metaData;
+
+        const geometryUUID = this.ensureGeometryMeta(meta);
+        const materialUUID = this.ensureMaterialMeta(meta);
+        const rendererEmitterSettingsJSON = this.toRendererSettingsJSON();
+
         return {
-            version: '1.0',
+            version: '3.0',
             autoDestroy: this.autoDestroy,
             looping: this.looping,
+            prewarm: this.prewarm,
             duration: this.duration,
             shape: this.emitterShape.toJSON(),
             startLife: this.startLife.toJSON(),
@@ -565,11 +827,245 @@ export class ParticleSystem implements IParticleSystem {
             startColor: this.startColor.toJSON(),
             emissionOverTime: this.emissionOverTime.toJSON(),
             emissionOverDistance: this.emissionOverDistance.toJSON(),
+            emissionBursts: this.emissionBursts.map((burst) => ({
+                time: burst.time,
+                count: burst.count.toJSON(),
+                probability: burst.probability,
+                interval: burst.interval,
+                cycle: burst.cycle,
+            })),
             onlyUsedByOther: this.onlyUsedByOther,
+            instancingGeometry: geometryUUID,
             renderMode: this.renderMode,
             renderOrder: this.renderOrder,
-            worldSpace: this.worldSpace,
+            rendererEmitterSettings: rendererEmitterSettingsJSON,
+            material: materialUUID,
+            layers: this.rendererSettings.layerMask,
+            startTileIndex: this.startTileIndex.toJSON(),
+            uTileCount: this.rendererSettings.uTileCount,
+            vTileCount: this.rendererSettings.vTileCount,
+            blendTiles: this.rendererSettings.blendTiles,
+            softParticles: this.rendererSettings.softParticles,
+            softFarFade: this.rendererSettings.softFarFade,
+            softNearFade: this.rendererSettings.softNearFade,
+            blending: this.rendererSettings.materialBlendMode,
+            transparent: this.rendererSettings.materialTransparent,
+            depthTest: this.rendererSettings.materialDepthTest,
+            depthWrite: this.rendererSettings.materialDepthWrite,
+            alphaTest: this.rendererSettings.materialAlphaTest,
             behaviors: this.behaviors.map((b) => b.toJSON()),
+            worldSpace: this.worldSpace,
+        };
+    }
+
+    static fromJSON(
+        json: ParticleSystemJSONParameters,
+        meta: BabylonMetaData,
+        dependencies: {[uuid: string]: Behavior} = {},
+        scene?: Scene
+    ): ParticleSystem {
+        const shape = EmitterFromJSON(json.shape, meta as any);
+        let rendererEmitterSettings: RendererEmitterSettings;
+        if (json.renderMode === RenderMode.Trail) {
+            const trailSettings = json.rendererEmitterSettings as TrailSettings;
+            rendererEmitterSettings = {
+                startLength:
+                    trailSettings?.startLength !== undefined
+                        ? ValueGeneratorFromJSON(trailSettings.startLength)
+                        : new ConstantValue(30),
+                followLocalOrigin: trailSettings?.followLocalOrigin ?? false,
+            };
+        } else if (json.renderMode === RenderMode.StretchedBillBoard) {
+            rendererEmitterSettings = {...(json.rendererEmitterSettings ?? {})};
+            if (json.speedFactor !== undefined) {
+                (rendererEmitterSettings as StretchedBillBoardSettings).speedFactor = json.speedFactor;
+            }
+        } else {
+            rendererEmitterSettings = {};
+        }
+
+        const materialMeta = json.material ? meta.materials?.[json.material] : undefined;
+        const materialTextureRef = materialMeta?.texture ?? json.texture;
+        const texture =
+            typeof materialTextureRef === 'string'
+                ? meta.textures?.[materialTextureRef] ?? null
+                : materialTextureRef ?? null;
+        const resolvedGeometryEntry =
+            typeof json.instancingGeometry === 'string'
+                ? meta.geometries?.[json.instancingGeometry]
+                : json.instancingGeometry;
+        const resolvedGeometry = ParticleSystem.resolveGeometryData(resolvedGeometryEntry);
+
+        const ps = new ParticleSystem({
+            scene,
+            autoDestroy: json.autoDestroy,
+            looping: json.looping,
+            prewarm: json.prewarm,
+            duration: json.duration,
+            shape,
+            startLife: ValueGeneratorFromJSON(json.startLife),
+            startSpeed: ValueGeneratorFromJSON(json.startSpeed),
+            startRotation: GeneratorFromJSON(json.startRotation) as RotationGenerator | ValueGenerator | FunctionValueGenerator,
+            startSize: GeneratorFromJSON(json.startSize) as Vector3Generator | ValueGenerator | FunctionValueGenerator,
+            startColor: ColorGeneratorFromJSON(json.startColor) as ColorGenerator,
+            emissionOverTime: ValueGeneratorFromJSON(json.emissionOverTime),
+            emissionOverDistance: ValueGeneratorFromJSON(json.emissionOverDistance),
+            emissionBursts: json.emissionBursts?.map((burst: any) => ({
+                time: burst.time,
+                count: typeof burst.count === 'number' ? new ConstantValue(burst.count) : ValueGeneratorFromJSON(burst.count),
+                probability: burst.probability ?? 1,
+                interval: burst.interval ?? 0.1,
+                cycle: burst.cycle ?? burst.cycleCount ?? 1,
+            })),
+            onlyUsedByOther: json.onlyUsedByOther,
+            instancingGeometry: resolvedGeometry.positions,
+            instancingIndices: resolvedGeometry.indices,
+            instancingUVs: resolvedGeometry.uvs,
+            instancingNormals: resolvedGeometry.normals,
+            renderMode: json.renderMode,
+            rendererEmitterSettings,
+            renderOrder: json.renderOrder,
+            texture,
+            material: materialMeta?.sourceMaterial,
+            blendMode: materialMeta?.alphaMode ?? json.blending ?? Constants.ALPHA_ADD,
+            transparent: materialMeta?.transparent ?? json.transparent ?? true,
+            depthTest: materialMeta?.depthTest ?? json.depthTest ?? true,
+            depthWrite: materialMeta?.depthWrite ?? json.depthWrite ?? false,
+            alphaTest: materialMeta?.alphaTest ?? json.alphaTest ?? 0,
+            startTileIndex:
+                typeof json.startTileIndex === 'number'
+                    ? new ConstantValue(json.startTileIndex)
+                    : (ValueGeneratorFromJSON(json.startTileIndex) as ValueGenerator),
+            uTileCount: json.uTileCount,
+            vTileCount: json.vTileCount,
+            blendTiles: json.blendTiles,
+            softParticles: json.softParticles,
+            softFarFade: json.softFarFade,
+            softNearFade: json.softNearFade,
+            behaviors: [],
+            worldSpace: json.worldSpace,
+            layerMask: json.layers,
+        });
+        ps.behaviors = (json.behaviors ?? [])
+            .map((behaviorJson) => {
+                const behavior = BehaviorFromJSON(behaviorJson, ps);
+                if (behavior && behavior.type === 'EmitSubParticleSystem') {
+                    dependencies[(behaviorJson as any).subParticleSystem] = behavior;
+                }
+                return behavior;
+            })
+            .filter((behavior) => behavior !== null) as Behavior[];
+        return ps;
+    }
+
+    private static nextSerializationId(prefix: string): string {
+        ParticleSystem.serializationCounter += 1;
+        return `${prefix}_${ParticleSystem.serializationCounter}`;
+    }
+
+    private static createFallbackNormals(positions: Float32Array): Float32Array {
+        const normals = new Float32Array(positions.length);
+        for (let i = 0; i < normals.length; i += 3) {
+            normals[i] = 0;
+            normals[i + 1] = 0;
+            normals[i + 2] = 1;
+        }
+        return normals;
+    }
+
+    private toRendererSettingsJSON(): RendererEmitterSettings {
+        if (this.renderMode === RenderMode.Trail) {
+            return {
+                startLength: (this.rendererEmitterSettings as TrailSettings).startLength.toJSON(),
+                followLocalOrigin: (this.rendererEmitterSettings as TrailSettings).followLocalOrigin,
+            };
+        }
+        if (this.renderMode === RenderMode.StretchedBillBoard) {
+            return {
+                speedFactor: (this.rendererEmitterSettings as StretchedBillBoardSettings).speedFactor,
+                lengthFactor: (this.rendererEmitterSettings as StretchedBillBoardSettings).lengthFactor,
+            };
+        }
+        return {};
+    }
+
+    private ensureGeometryMeta(meta: BabylonMetaData): string {
+        const geometryUUID = ParticleSystem.nextSerializationId('quarks_geometry');
+        meta.geometries[geometryUUID] = {
+            uuid: geometryUUID,
+            type: 'QuarksGeometry',
+            positions: Array.from(this.rendererSettings.instancingGeometry),
+            indices: Array.from(this.rendererSettings.instancingIndices),
+            uvs: this.rendererSettings.instancingUVs ? Array.from(this.rendererSettings.instancingUVs) : undefined,
+            normals: this.rendererSettings.instancingNormals ? Array.from(this.rendererSettings.instancingNormals) : undefined,
+        };
+        return geometryUUID;
+    }
+
+    private ensureMaterialMeta(meta: BabylonMetaData): string {
+        const texture = this.rendererSettings.texture;
+        let textureUUID: string | undefined;
+        if (texture) {
+            textureUUID = ParticleSystem.nextSerializationId('quarks_texture');
+            meta.textures[textureUUID] = texture;
+        }
+
+        const materialUUID = ParticleSystem.nextSerializationId('quarks_material');
+        meta.materials[materialUUID] = {
+            uuid: materialUUID,
+            type: 'QuarksMaterial',
+            transparent: this.rendererSettings.materialTransparent,
+            alphaMode: this.rendererSettings.materialBlendMode,
+            depthTest: this.rendererSettings.materialDepthTest,
+            depthWrite: this.rendererSettings.materialDepthWrite,
+            alphaTest: this.rendererSettings.materialAlphaTest,
+            texture: textureUUID,
+            sourceMaterial: this.materialRef ?? undefined,
+        };
+        return materialUUID;
+    }
+
+    private static resolveGeometryData(entry: any): {
+        positions: Float32Array;
+        indices: Uint32Array | Uint16Array;
+        uvs?: Float32Array;
+        normals?: Float32Array;
+    } {
+        if (entry?.positions && entry?.indices) {
+            return {
+                positions: entry.positions instanceof Float32Array ? entry.positions : new Float32Array(entry.positions),
+                indices:
+                    entry.indices instanceof Uint16Array || entry.indices instanceof Uint32Array
+                        ? entry.indices
+                        : new Uint32Array(entry.indices),
+                uvs: entry.uvs
+                    ? entry.uvs instanceof Float32Array
+                        ? entry.uvs
+                        : new Float32Array(entry.uvs)
+                    : undefined,
+                normals: entry.normals
+                    ? entry.normals instanceof Float32Array
+                        ? entry.normals
+                        : new Float32Array(entry.normals)
+                    : undefined,
+            };
+        }
+
+        const data = entry?.data ?? entry;
+        if (data?.attributes?.position?.array && data?.index?.array) {
+            const indexType = data.index.type === 'Uint16Array' ? Uint16Array : Uint32Array;
+            return {
+                positions: new Float32Array(data.attributes.position.array),
+                indices: new indexType(data.index.array),
+                uvs: data.attributes.uv?.array ? new Float32Array(data.attributes.uv.array) : undefined,
+                normals: data.attributes.normal?.array ? new Float32Array(data.attributes.normal.array) : undefined,
+            };
+        }
+
+        return {
+            positions: DEFAULT_POSITIONS,
+            indices: DEFAULT_INDICES,
+            uvs: DEFAULT_UVS,
         };
     }
 
@@ -624,6 +1120,7 @@ export class ParticleSystem implements IParticleSystem {
         return new ParticleSystem({
             autoDestroy: this.autoDestroy,
             looping: this.looping,
+            prewarm: this.prewarm,
             duration: this.duration,
             shape: this.emitterShape.clone(),
             startLife: this.startLife.clone(),
@@ -638,9 +1135,11 @@ export class ParticleSystem implements IParticleSystem {
             instancingGeometry: this.rendererSettings.instancingGeometry,
             instancingIndices: this.rendererSettings.instancingIndices,
             instancingUVs: this.rendererSettings.instancingUVs,
+            instancingNormals: this.rendererSettings.instancingNormals,
             renderMode: this.renderMode,
             renderOrder: this.renderOrder,
             rendererEmitterSettings,
+            material: this.materialRef,
             texture: this.rendererSettings.texture,
             startTileIndex: this.startTileIndex,
             uTileCount: this.rendererSettings.uTileCount,
@@ -657,6 +1156,7 @@ export class ParticleSystem implements IParticleSystem {
             depthWrite: this.rendererSettings.materialDepthWrite,
             alphaTest: this.rendererSettings.materialAlphaTest,
             layerMask: this.rendererSettings.layerMask,
+            scene: this.emitter.getScene(),
         });
     }
 }

@@ -54,6 +54,14 @@ export class QuarksUtil {
         });
     }
 
+    static endEmit(root: Node): void {
+        QuarksUtil.traverseNode(root, (node) => {
+            if (node instanceof ParticleEmitter) {
+                (node.system as unknown as ParticleSystem).endEmit();
+            }
+        });
+    }
+
     private static traverseNode(node: Node, callback: (node: Node) => void): void {
         callback(node);
         const children = node.getChildren();
