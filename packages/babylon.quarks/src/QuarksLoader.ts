@@ -303,6 +303,7 @@ export class QuarksLoader {
             case 'Line':
             case 'LineSegments':
             case 'LineLoop':
+            case 'PointCloud':
             case 'Points':
             case 'Sprite':
             case 'Bone':

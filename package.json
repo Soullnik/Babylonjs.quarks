@@ -9,6 +9,8 @@
     "build": "npm run build --workspace=quarks.core --workspace=three.quarks --workspace=quarks.r3f --workspace=quarks.nodes --workspace=quarks.playground --workspace=quarks.examples",
     "dev": "npm run dev --workspaces",
     "test": "npm run test  --workspaces",
+    "parity:audit": "node ./scripts/parity-audit.mjs",
+    "parity:audit:full": "node ./scripts/parity-audit.mjs --with-build --with-tests",
     "examples": "npm run dev --workspace=quarks.examples",
     "playground": "npm run dev --workspace=quarks.playground",
     "prettier": "npm run prettier --workspaces",
