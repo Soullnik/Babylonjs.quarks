@@ -113,6 +113,10 @@ export class MeshSurfaceEmitter implements EmitterShape {
         return {type: 'mesh_surface', mesh: this._mesh ? (this._mesh as any).uniqueId?.toString() : this._meshReferenceId ?? ''};
     }
 
+    static fromJSON(json: any): MeshSurfaceEmitter {
+        return new MeshSurfaceEmitter(undefined, json?.mesh);
+    }
+
     clone(): EmitterShape {
         return new MeshSurfaceEmitter(this._mesh, this._meshReferenceId);
     }
@@ -127,7 +131,7 @@ export const MeshSurfaceEmitterPlugin: Plugin = {
         type: 'mesh_surface',
         params: [['mesh', ['mesh']]],
         constructor: MeshSurfaceEmitter,
-        loadJSON: (json: any) => new MeshSurfaceEmitter(undefined, json?.mesh),
+        loadJSON: (json: any) => MeshSurfaceEmitter.fromJSON(json),
     }],
     behaviors: [],
 };

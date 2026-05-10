@@ -1,32 +1,18 @@
 import {Scene} from '@babylonjs/core/scene';
 import {TransformNode} from '@babylonjs/core/Meshes/transformNode';
 import {Mesh} from '@babylonjs/core/Meshes/mesh';
+import {VertexData} from '@babylonjs/core/Meshes/mesh.vertexData';
 import {Texture} from '@babylonjs/core/Materials/Textures/texture';
+import {StandardMaterial} from '@babylonjs/core/Materials/standardMaterial';
 import {Constants} from '@babylonjs/core/Engines/constants';
 import {Matrix, Quaternion, Vector3} from '@babylonjs/core/Maths/math.vector';
 import {
     Behavior,
     EmitSubParticleSystem,
-    BehaviorFromJSON,
-    EmitterFromJSON,
-    ValueGeneratorFromJSON,
-    ColorGeneratorFromJSON,
-    GeneratorFromJSON,
-    ConstantValue,
-    ConstantColor,
-    Vector4,
-    RotationGenerator,
-    FunctionValueGenerator,
-    ValueGenerator,
-    Vector3Generator,
-    ColorGenerator,
-    TrailSettings,
-    StretchedBillBoardSettings,
 } from 'quarks.core';
 import {ParticleSystem} from './ParticleSystem';
 import {ParticleEmitter} from './ParticleEmitter';
-import {RenderMode} from './VFXBatch';
-import {BatchedRenderer} from './BatchedRenderer';
+import {QuarksPrefab} from './QuarksPrefab';
 
 export interface QuarksLoaderOptions {
     baseUrl?: string;
@@ -99,11 +85,83 @@ export class QuarksLoader {
                     uvs: new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]),
                     normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
                 };
+            } else if (geom.type === 'SphereGeometry') {
+                meta.geometries[geom.uuid] = this.parseSphereGeometry(geom);
             } else if (geom.type === 'BufferGeometry' && geom.data) {
                 const parsed = this.parseBufferGeometry(geom.data);
                 meta.geometries[geom.uuid] = parsed;
             }
         }
+    }
+
+    private parseSphereGeometry(geom: any): ParsedGeometry {
+        const radius = geom.radius ?? 0.5;
+        const widthSegments = Math.max(3, Math.floor(geom.widthSegments ?? 16));
+        const heightSegments = Math.max(2, Math.floor(geom.heightSegments ?? 8));
+        const phiStart = geom.phiStart ?? 0;
+        const phiLength = geom.phiLength ?? Math.PI * 2;
+        const thetaStart = geom.thetaStart ?? 0;
+        const thetaLength = geom.thetaLength ?? Math.PI;
+
+        const positions: number[] = [];
+        const normals: number[] = [];
+        const uvs: number[] = [];
+        const indices: number[] = [];
+        const grid: number[][] = [];
+
+        let index = 0;
+
+        for (let iy = 0; iy <= heightSegments; iy++) {
+            const verticesRow: number[] = [];
+            const v = iy / heightSegments;
+            const theta = thetaStart + v * thetaLength;
+
+            for (let ix = 0; ix <= widthSegments; ix++) {
+                const u = ix / widthSegments;
+                const phi = phiStart + u * phiLength;
+
+                const x = -radius * Math.cos(phi) * Math.sin(theta);
+                const y = radius * Math.cos(theta);
+                const z = radius * Math.sin(phi) * Math.sin(theta);
+
+                positions.push(x, y, z);
+                const length = Math.hypot(x, y, z) || 1;
+                normals.push(x / length, y / length, z / length);
+                uvs.push(u, 1 - v);
+
+                verticesRow.push(index++);
+            }
+
+            grid.push(verticesRow);
+        }
+
+        const thetaEnd = thetaStart + thetaLength;
+        const isTopFull = thetaStart <= 0;
+        const isBottomFull = thetaEnd >= Math.PI;
+
+        for (let iy = 0; iy < heightSegments; iy++) {
+            for (let ix = 0; ix < widthSegments; ix++) {
+                const a = grid[iy][ix + 1];
+                const b = grid[iy][ix];
+                const c = grid[iy + 1][ix];
+                const d = grid[iy + 1][ix + 1];
+
+                if (iy !== 0 || !isTopFull) {
+                    indices.push(a, b, d);
+                }
+                if (iy !== heightSegments - 1 || !isBottomFull) {
+                    indices.push(b, c, d);
+                }
+            }
+        }
+
+        const typedIndices = positions.length / 3 > 65535 ? new Uint32Array(indices) : new Uint16Array(indices);
+        return {
+            positions: new Float32Array(positions),
+            indices: typedIndices,
+            uvs: new Float32Array(uvs),
+            normals: new Float32Array(normals),
+        };
     }
 
     private parseBufferGeometry(data: any): ParsedGeometry {
@@ -196,10 +254,38 @@ export class QuarksLoader {
         for (const texDef of textures) {
             const imageUrl = images[texDef.image];
             if (imageUrl) {
-                meta.textures[texDef.uuid] = new Texture(imageUrl, this.scene);
+                const texture = new Texture(imageUrl, this.scene);
+                if (Array.isArray(texDef.wrap)) {
+                    texture.wrapU = this.mapWrapMode(texDef.wrap[0]);
+                    texture.wrapV = this.mapWrapMode(texDef.wrap[1] ?? texDef.wrap[0]);
+                }
+                if (Array.isArray(texDef.repeat)) {
+                    texture.uScale = texDef.repeat[0] ?? 1;
+                    texture.vScale = texDef.repeat[1] ?? 1;
+                }
+                if (Array.isArray(texDef.offset)) {
+                    texture.uOffset = texDef.offset[0] ?? 0;
+                    texture.vOffset = texDef.offset[1] ?? 0;
+                }
+                if (typeof texDef.rotation === 'number') {
+                    texture.wAng = texDef.rotation;
+                }
+                meta.textures[texDef.uuid] = texture;
             } else {
                 meta.textures[texDef.uuid] = null;
             }
+        }
+    }
+
+    private mapWrapMode(wrapMode?: number): number {
+        switch (wrapMode) {
+            case 1001: // ClampToEdgeWrapping (three.js)
+                return Texture.CLAMP_ADDRESSMODE;
+            case 1002: // MirroredRepeatWrapping (three.js)
+                return Texture.MIRROR_ADDRESSMODE;
+            case 1000: // RepeatWrapping (three.js)
+            default:
+                return Texture.WRAP_ADDRESSMODE;
         }
     }
 
@@ -232,14 +318,99 @@ export class QuarksLoader {
         }
     }
 
+    private getGeometry(meta: LoadedMeta, geometryId: string | undefined): ParsedGeometry | undefined {
+        if (!geometryId) return undefined;
+        return meta.geometries[geometryId];
+    }
+
+    private getMaterial(meta: LoadedMeta, materialId: string | string[] | undefined): any | undefined {
+        if (!materialId) return undefined;
+        const selectedId = Array.isArray(materialId) ? materialId[0] : materialId;
+        return meta.materials[selectedId];
+    }
+
+    private createPlaceholderNode(type: string, name?: string): TransformNode {
+        const node = new TransformNode(name || type || 'node', this.scene);
+        (node as any).quarksOriginalType = type;
+        return node;
+    }
+
+    private createMeshNode(data: any, meta: LoadedMeta): Mesh {
+        const mesh = new Mesh(data.name || data.type || 'mesh', this.scene);
+        const geometry = this.getGeometry(meta, data.geometry);
+        if (geometry && geometry.positions.length > 0 && geometry.indices.length > 0) {
+            const vertexData = new VertexData();
+            vertexData.positions = Array.from(geometry.positions);
+            vertexData.indices = Array.from(geometry.indices);
+            if (geometry.uvs && geometry.uvs.length > 0) {
+                vertexData.uvs = Array.from(geometry.uvs);
+            }
+            if (geometry.normals && geometry.normals.length > 0) {
+                vertexData.normals = Array.from(geometry.normals);
+            }
+            vertexData.applyToMesh(mesh, true);
+        }
+
+        const materialInfo = this.getMaterial(meta, data.material);
+        if (materialInfo) {
+            const material = new StandardMaterial(`quarks_loader_material_${materialInfo.uuid}`, this.scene);
+            material.alphaMode = materialInfo.alphaMode ?? Constants.ALPHA_COMBINE;
+            material.backFaceCulling = materialInfo.side !== 2;
+            material.alphaCutOff = materialInfo.alphaTest ?? 0;
+            material.disableDepthWrite = !(materialInfo.depthWrite ?? false);
+            if (materialInfo.texture) {
+                material.diffuseTexture = materialInfo.texture;
+                material.opacityTexture = materialInfo.texture;
+            }
+            mesh.material = material;
+        }
+        return mesh;
+    }
+
     private parseObject(data: any, meta: LoadedMeta): TransformNode {
         let node: TransformNode;
-
-        if (data.type === 'ParticleEmitter' && data.ps) {
-            const ps = this.parseParticleSystem(data.ps, meta);
-            node = ps.emitter;
-        } else {
-            node = new TransformNode(data.name || data.type || 'node', this.scene);
+        switch (data.type) {
+            case 'QuarksPrefab':
+                node = QuarksPrefab.fromJSON(data, this.scene);
+                break;
+            case 'ParticleEmitter':
+                if (data.ps) {
+                    const ps = this.parseParticleSystem(data.ps, meta);
+                    node = ps.emitter;
+                    break;
+                }
+                node = this.createPlaceholderNode(data.type, data.name);
+                break;
+            case 'Mesh':
+            case 'SkinnedMesh':
+            case 'InstancedMesh':
+            case 'BatchedMesh':
+                node = this.createMeshNode(data, meta);
+                break;
+            case 'Scene':
+            case 'Group':
+            case 'Object3D':
+            case 'PerspectiveCamera':
+            case 'OrthographicCamera':
+            case 'AmbientLight':
+            case 'DirectionalLight':
+            case 'PointLight':
+            case 'RectAreaLight':
+            case 'SpotLight':
+            case 'HemisphereLight':
+            case 'LightProbe':
+            case 'LOD':
+            case 'Line':
+            case 'LineSegments':
+            case 'LineLoop':
+            case 'PointCloud':
+            case 'Points':
+            case 'Sprite':
+            case 'Bone':
+                node = this.createPlaceholderNode(data.type, data.name);
+                break;
+            default:
+                node = new TransformNode(data.name || data.type || 'node', this.scene);
         }
 
         if (data.uuid) (node as any)._quarksUUID = data.uuid;
@@ -277,100 +448,9 @@ export class QuarksLoader {
     }
 
     private parseParticleSystem(json: any, meta: LoadedMeta): ParticleSystem {
-        const shape = EmitterFromJSON(json.shape, meta as any);
-
-        let rendererEmitterSettings: any;
-        if (json.renderMode === RenderMode.Trail) {
-            const trailSettings = json.rendererEmitterSettings as any;
-            rendererEmitterSettings = {
-                startLength: trailSettings?.startLength ? ValueGeneratorFromJSON(trailSettings.startLength) : new ConstantValue(30),
-                followLocalOrigin: trailSettings?.followLocalOrigin ?? false,
-            };
-        } else if (json.renderMode === RenderMode.StretchedBillBoard) {
-            rendererEmitterSettings = json.rendererEmitterSettings || {};
-            if (json.speedFactor != undefined) {
-                (rendererEmitterSettings as StretchedBillBoardSettings).speedFactor = json.speedFactor;
-            }
-        } else {
-            rendererEmitterSettings = {};
-        }
-
-        const matInfo = meta.materials[json.material];
-        const texture = matInfo?.texture || null;
-        const transparent = matInfo?.transparent ?? json.transparent ?? true;
-        const blendMode = matInfo?.alphaMode ?? Constants.ALPHA_ADD;
-        const depthTest = matInfo?.depthTest ?? true;
-        const depthWrite = matInfo?.depthWrite ?? false;
-        const alphaTest = matInfo?.alphaTest ?? 0;
-
-        let geomData = meta.geometries[json.instancingGeometry];
-        if (!geomData) {
-            geomData = {
-                positions: new Float32Array([-0.5, -0.5, 0, 0.5, -0.5, 0, 0.5, 0.5, 0, -0.5, 0.5, 0]),
-                indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
-                uvs: new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]),
-            };
-        }
-
-        const ps = new ParticleSystem({
-            scene: this.scene,
-            autoDestroy: json.autoDestroy,
-            looping: json.looping,
-            prewarm: json.prewarm,
-            duration: json.duration,
-            shape,
-            startLife: ValueGeneratorFromJSON(json.startLife),
-            startSpeed: ValueGeneratorFromJSON(json.startSpeed),
-            startRotation: GeneratorFromJSON(json.startRotation) as any,
-            startSize: GeneratorFromJSON(json.startSize) as any,
-            startColor: ColorGeneratorFromJSON(json.startColor) as ColorGenerator,
-            emissionOverTime: ValueGeneratorFromJSON(json.emissionOverTime),
-            emissionOverDistance: ValueGeneratorFromJSON(json.emissionOverDistance),
-            emissionBursts: json.emissionBursts?.map((burst: any) => ({
-                time: burst.time,
-                count: typeof burst.count === 'number' ? new ConstantValue(burst.count) : ValueGeneratorFromJSON(burst.count),
-                probability: burst.probability ?? 1,
-                interval: burst.interval ?? 0.1,
-                cycle: burst.cycle ?? burst.cycleCount ?? 1,
-            })),
-            onlyUsedByOther: json.onlyUsedByOther,
-            instancingGeometry: geomData.positions,
-            instancingIndices: geomData.indices,
-            instancingUVs: geomData.uvs,
-            instancingNormals: geomData.normals,
-            renderMode: json.renderMode,
-            rendererEmitterSettings,
-            renderOrder: json.renderOrder,
-            texture,
-            transparent,
-            blendMode,
-            depthTest,
-            depthWrite,
-            alphaTest,
-            startTileIndex: typeof json.startTileIndex === 'number'
-                ? new ConstantValue(json.startTileIndex)
-                : (ValueGeneratorFromJSON(json.startTileIndex) as ValueGenerator),
-            uTileCount: json.uTileCount,
-            vTileCount: json.vTileCount,
-            blendTiles: json.blendTiles,
-            softParticles: json.softParticles,
-            softFarFade: json.softFarFade,
-            softNearFade: json.softNearFade,
-            behaviors: [],
-            worldSpace: json.worldSpace,
-            layerMask: json.layers,
-        });
-        (ps as any)._meshSurfaceReferenceUUID = json?.shape?.type === 'mesh_surface' ? json?.shape?.mesh : undefined;
-
         const dependencies: {[uuid: string]: Behavior} = {};
-        ps.behaviors = json.behaviors.map((behaviorJson: any) => {
-            const behavior = BehaviorFromJSON(behaviorJson, ps);
-            if (behavior && behavior.type === 'EmitSubParticleSystem') {
-                dependencies[behaviorJson.subParticleSystem] = behavior;
-            }
-            return behavior;
-        }).filter((b: any) => b !== null);
-
+        const ps = ParticleSystem.fromJSON(json, meta as any, dependencies, this.scene);
+        (ps as any)._meshSurfaceReferenceUUID = json?.shape?.type === 'mesh_surface' ? json?.shape?.mesh : undefined;
         return ps;
     }
 
@@ -390,6 +470,9 @@ export class QuarksLoader {
         traverse(root);
 
         const linkNode = (node: TransformNode) => {
+            if (node instanceof QuarksPrefab) {
+                node.resolveReferences(root);
+            }
             if (node instanceof ParticleEmitter) {
                 const system = node.system as ParticleSystem;
                 const meshSurfaceUUID = (system as any)._meshSurfaceReferenceUUID;

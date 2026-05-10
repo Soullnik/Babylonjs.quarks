@@ -5,7 +5,7 @@ import {Effect} from '@babylonjs/core/Materials/effect';
 import {ShaderMaterial} from '@babylonjs/core/Materials/shaderMaterial';
 import {Scene} from '@babylonjs/core/scene';
 import {Constants} from '@babylonjs/core/Engines/constants';
-import {Vector2 as BVector2, Vector4 as BVector4} from '@babylonjs/core/Maths/math.vector';
+import {Vector2 as BVector2, Vector3 as BVector3, Vector4 as BVector4} from '@babylonjs/core/Maths/math.vector';
 import {
     Vector3,
     Vector4,
@@ -18,8 +18,9 @@ import {VFXBatch, RenderMode} from './VFXBatch';
 import {VFXBatchSettings} from './BatchedRenderer';
 import particle_vert from './shaders/particle_vert.glsl';
 import particle_frag from './shaders/particle_frag.glsl';
+import particle_physics_frag from './shaders/particle_physics_frag.glsl';
 import stretched_bb_particle_vert from './shaders/stretched_bb_particle_vert.glsl';
-import local_particle_vert from './shaders/local_particle_vert.glsl';
+import local_particle_physics_vert from './shaders/local_particle_physics_vert.glsl';
 
 export class SpriteBatch extends VFXBatch {
     private offsetBuffer!: Float32Array;
@@ -111,14 +112,18 @@ export class SpriteBatch extends VFXBatch {
     rebuildMaterial(): void {
         const shaderName = `quarksParticle_${this.settings.renderMode}_${Date.now()}`;
         let vertexShader: string;
+        let fragmentShader: string;
         const defines: string[] = [];
 
         if (this.settings.renderMode === RenderMode.Mesh) {
-            vertexShader = local_particle_vert;
+            vertexShader = local_particle_physics_vert;
+            fragmentShader = particle_physics_frag;
         } else if (this.settings.renderMode === RenderMode.StretchedBillBoard) {
             vertexShader = stretched_bb_particle_vert;
+            fragmentShader = particle_frag;
         } else {
             vertexShader = particle_vert;
+            fragmentShader = particle_frag;
         }
 
         if (this.settings.texture) {
@@ -144,9 +149,12 @@ export class SpriteBatch extends VFXBatch {
         }
 
         Effect.ShadersStore[shaderName + 'VertexShader'] = vertexShader;
-        Effect.ShadersStore[shaderName + 'FragmentShader'] = particle_frag;
+        Effect.ShadersStore[shaderName + 'FragmentShader'] = fragmentShader;
 
         const attributes = ['position', 'uv', 'offset', 'color', 'size', 'rotation', 'uvTile'];
+        if (this.settings.renderMode === RenderMode.Mesh) {
+            attributes.push('normal');
+        }
         if (this.settings.renderMode === RenderMode.StretchedBillBoard) {
             attributes.push('velocity');
         }
@@ -171,6 +179,11 @@ export class SpriteBatch extends VFXBatch {
         }
         if (this.settings.materialAlphaTest > 0) {
             uniforms.push('alphaTest');
+        }
+        if (this.settings.renderMode === RenderMode.Mesh) {
+            uniforms.push('lightDirection');
+            uniforms.push('lightColor');
+            uniforms.push('ambientColor');
         }
 
         const mat = new ShaderMaterial(shaderName, this.scene,
@@ -205,6 +218,11 @@ export class SpriteBatch extends VFXBatch {
         }
         if (this.settings.materialAlphaTest > 0) {
             mat.setFloat('alphaTest', this.settings.materialAlphaTest);
+        }
+        if (this.settings.renderMode === RenderMode.Mesh) {
+            mat.setVector3('lightDirection', new BVector3(0.4, -1, 0.6));
+            mat.setVector3('lightColor', new BVector3(1, 1, 1));
+            mat.setVector3('ambientColor', new BVector3(0.35, 0.35, 0.35));
         }
 
         mat.backFaceCulling = false;

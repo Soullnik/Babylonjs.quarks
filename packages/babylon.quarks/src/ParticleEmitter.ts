@@ -1,6 +1,6 @@
 import {TransformNode} from '@babylonjs/core/Meshes/transformNode';
 import {Scene} from '@babylonjs/core/scene';
-import {Matrix4, IParticleSystem} from 'quarks.core';
+import {Matrix4, IParticleSystem, SerializationOptions} from 'quarks.core';
 
 export class ParticleEmitter extends TransformNode {
     system: IParticleSystem;
@@ -37,11 +37,50 @@ export class ParticleEmitter extends TransformNode {
         super.dispose();
     }
 
+    extractFromCache(cache: any): any[] {
+        const values: any[] = [];
+        for (const key in cache) {
+            const data = cache[key];
+            if (data && typeof data === 'object') {
+                delete data.metadata;
+            }
+            values.push(data);
+        }
+        return values;
+    }
+
     clone(name?: string): ParticleEmitter {
-        const clonedEmitter = new ParticleEmitter(this.system, this.getScene());
-        clonedEmitter.position = this.position.clone();
-        clonedEmitter.rotation = this.rotation.clone();
-        clonedEmitter.scaling = this.scaling.clone();
+        const clonedSystem = this.system.clone();
+        const clonedEmitter = clonedSystem.emitter as ParticleEmitter;
+        clonedEmitter.name = name ?? this.name;
+        clonedEmitter.position.copyFrom(this.position);
+        clonedEmitter.rotation.copyFrom(this.rotation);
+        clonedEmitter.scaling.copyFrom(this.scaling);
+        if (this.rotationQuaternion) {
+            clonedEmitter.rotationQuaternion = this.rotationQuaternion.clone();
+        }
+        clonedEmitter.setEnabled(this.isEnabled());
         return clonedEmitter;
+    }
+
+    toJSON(meta?: any, options: SerializationOptions = {}): any {
+        return {
+            uuid: (this as any)._quarksUUID ?? this.uniqueId.toString(),
+            type: 'ParticleEmitter',
+            name: this.name,
+            position: [this.position.x, this.position.y, this.position.z],
+            rotation: [this.rotation.x, this.rotation.y, this.rotation.z],
+            quaternion: this.rotationQuaternion
+                ? [
+                    this.rotationQuaternion.x,
+                    this.rotationQuaternion.y,
+                    this.rotationQuaternion.z,
+                    this.rotationQuaternion.w,
+                ]
+                : undefined,
+            scale: [this.scaling.x, this.scaling.y, this.scaling.z],
+            visible: this.isEnabled(),
+            ps: this.system.toJSON(meta, options),
+        };
     }
 }

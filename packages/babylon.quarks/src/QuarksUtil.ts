@@ -6,51 +6,53 @@ import {BatchedRenderer} from './BatchedRenderer';
 import {IParticleSystem} from 'quarks.core';
 
 export class QuarksUtil {
-    static addToBatchRenderer(root: Node, batchRenderer: BatchedRenderer): void {
+    static runOnAllParticleEmitters(root: Node, callback: (emitter: ParticleEmitter) => void): void {
         QuarksUtil.traverseNode(root, (node) => {
             if (node instanceof ParticleEmitter) {
-                batchRenderer.addSystem(node.system);
+                callback(node);
             }
+        });
+    }
+
+    static addToBatchRenderer(root: Node, batchRenderer: BatchedRenderer): void {
+        QuarksUtil.runOnAllParticleEmitters(root, (emitter) => {
+            batchRenderer.addSystem(emitter.system);
         });
     }
 
     static play(root: Node): void {
-        QuarksUtil.traverseNode(root, (node) => {
-            if (node instanceof ParticleEmitter) {
-                (node.system as unknown as ParticleSystem).play();
-            }
+        QuarksUtil.runOnAllParticleEmitters(root, (emitter) => {
+            (emitter.system as unknown as ParticleSystem).play();
         });
     }
 
     static stop(root: Node): void {
-        QuarksUtil.traverseNode(root, (node) => {
-            if (node instanceof ParticleEmitter) {
-                (node.system as unknown as ParticleSystem).stop();
-            }
+        QuarksUtil.runOnAllParticleEmitters(root, (emitter) => {
+            (emitter.system as unknown as ParticleSystem).stop();
         });
     }
 
     static pause(root: Node): void {
-        QuarksUtil.traverseNode(root, (node) => {
-            if (node instanceof ParticleEmitter) {
-                (node.system as unknown as ParticleSystem).pause();
-            }
+        QuarksUtil.runOnAllParticleEmitters(root, (emitter) => {
+            (emitter.system as unknown as ParticleSystem).pause();
         });
     }
 
     static restart(root: Node): void {
-        QuarksUtil.traverseNode(root, (node) => {
-            if (node instanceof ParticleEmitter) {
-                (node.system as unknown as ParticleSystem).restart();
-            }
+        QuarksUtil.runOnAllParticleEmitters(root, (emitter) => {
+            (emitter.system as unknown as ParticleSystem).restart();
         });
     }
 
     static setAutoDestroy(root: Node, autoDestroy: boolean): void {
-        QuarksUtil.traverseNode(root, (node) => {
-            if (node instanceof ParticleEmitter) {
-                (node.system as unknown as ParticleSystem).autoDestroy = autoDestroy;
-            }
+        QuarksUtil.runOnAllParticleEmitters(root, (emitter) => {
+            (emitter.system as unknown as ParticleSystem).autoDestroy = autoDestroy;
+        });
+    }
+
+    static endEmit(root: Node): void {
+        QuarksUtil.runOnAllParticleEmitters(root, (emitter) => {
+            (emitter.system as unknown as ParticleSystem).endEmit();
         });
     }
 
